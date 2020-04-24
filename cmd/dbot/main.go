@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
+	"math/rand"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/dariubs/percent"
 	log "github.com/sirupsen/logrus"
@@ -18,12 +21,16 @@ type PossibleAction struct {
 }
 
 func main() {
-	basebot.Start("Simple Go Bot", models.Training, desiredGameSettings, calculateMove)
+	var desiredGameSettings *models.GameSettings = nil
+
+	basebot.Start("TestBot", models.Training, desiredGameSettings, calculateMove)
+
+	log.Info(desiredGameSettings)
 }
 
 //var moves = []models.Action{models.Left, models.Down, models.Right, models.Up} //, models.Stay}
 var lastDir = models.Stay
-var noOfRecursions = 5
+var noOfRecursions = 7
 
 // Implement your paintbot here
 func calculateMove(updateEvent models.MapUpdateEvent) models.Action {
@@ -42,14 +49,6 @@ func calculateMove(updateEvent models.MapUpdateEvent) models.Action {
 
 	possibleActions := calculateBestDirection(coordinates, utility, noOfRecursions, lastDir)
 
-	// log.Info(fmt.Printf("x: %d y: %d \n %s %d \n %s %d \n %s %d \n %s %d \n",
-	// 	coordinates.X, coordinates.Y,
-	// 	possibleActions[0].Action, possibleActions[0].Points,
-	// 	possibleActions[1].Action, possibleActions[1].Points,
-	// 	possibleActions[2].Action, possibleActions[2].Points,
-	// 	possibleActions[3].Action, possibleActions[3].Points))
-
-	// log.Info(possibleActions[0].Action)
 	lastDir = possibleActions[0].Action
 	return possibleActions[0].Action
 }
@@ -63,43 +62,12 @@ func calculateBestDirection(coordinats models.Coordinates, utility maputility.Ma
 		{Action: models.Up},
 	}
 
+	moves = shuffle(moves)
+
 	for i, action := range moves {
 		newCoordinates := utility.TranslateCoordinateByAction(action.Action, coordinats)
 
-		points := 0
-
-		if action.Action == getReverseMove(last) {
-			points += -10
-		}
-
-		switch tile := utility.GetTileAt(newCoordinates); tile {
-		case "OBSTACLE":
-
-			points += -100
-		case "POWERUP":
-			if utility.GetMyCharacterInfo().CarryingPowerUp {
-				points += 10
-			} else {
-				points += 100
-			}
-		case "PLAYER":
-			points += -50
-		case "OPEN":
-			if !utility.CanIMoveInDirection(getReverseMove(action.Action)) {
-				points += 10
-			} else {
-				points += 5
-			}
-
-			points += calculatePlayerOnPosition(newCoordinates, utility)
-		}
-
-		//points = points * recursion
-		if recursion > 1 && utility.CanIMoveInDirection(action.Action) {
-			possibleActions := calculateBestDirection(newCoordinates, utility, recursion-1, action.Action)
-			points += possibleActions[0].Points
-		}
-		moves[i].Points = points
+		moves[i].Points = calculateBestDirectionSync(action, newCoordinates, utility, recursion, last)
 	}
 
 	// Sort best moves first
@@ -110,18 +78,63 @@ func calculateBestDirection(coordinats models.Coordinates, utility maputility.Ma
 	return moves
 }
 
-func calculatePlayerOnPosition(coordinates models.Coordinates, utility maputility.MapUtility) int {
-	switch playerName := getPlayerOnPosition(coordinates, utility); playerName {
+func calculateBestDirectionSync(action PossibleAction, coordinats models.Coordinates, utility maputility.MapUtility, recursion int, last models.Action) int {
+
+	points := 0
+
+	if action.Action == getReverseMove(last) {
+		points += -10
+	}
+
+	switch tile := utility.GetTileAt(coordinats); tile {
+	case "OBSTACLE":
+		points += -150
+	case "POWERUP":
+		if utility.GetMyCharacterInfo().CarryingPowerUp {
+			points += 10
+		} else {
+			points += 500
+		}
+	case "PLAYER":
+		player, err := getPlayerOnPosition(coordinats, utility)
+		if err == nil {
+			if player.ID == utility.GetMyCharacterInfo().ID {
+				points += 0
+			} else {
+				if player.CarryingPowerUp {
+					points += -100
+				} else {
+					points += -5
+				}
+			}
+		}
+
+	case "OPEN":
+		points += 10
+
+		points += calculatePlayerColorOnPosition(coordinats, utility)
+	}
+
+	if recursion > 1 && utility.CanIMoveInDirection(action.Action) {
+		possibleActions := calculateBestDirection(coordinats, utility, recursion-1, action.Action)
+		points += possibleActions[0].Points
+	}
+
+	return points
+}
+
+func calculatePlayerColorOnPosition(coordinates models.Coordinates, utility maputility.MapUtility) int {
+	switch playerName := getPlayerColorIDOnPosition(coordinates, utility); playerName {
 	case "":
 		return 0
 	case utility.GetMyCharacterInfo().ID:
-		return -5
+		return -10
 	default:
 		return 10
 	}
 }
 
-func getPlayerOnPosition(coordinates models.Coordinates, utility maputility.MapUtility) string {
+func getPlayerColorIDOnPosition(coordinates models.Coordinates, utility maputility.MapUtility) string {
 	position := utility.ConvertCoordinatesToPosition(coordinates)
 	for _, character := range utility.Map.CharacterInfos {
 
@@ -132,6 +145,19 @@ func getPlayerOnPosition(coordinates models.Coordinates, utility maputility.MapU
 		}
 	}
 	return ""
+}
+
+func getPlayerOnPosition(coordinates models.Coordinates, utility maputility.MapUtility) (models.CharacterInfo, error) {
+
+	position := utility.ConvertCoordinatesToPosition(coordinates)
+	for _, character := range utility.Map.CharacterInfos {
+
+		if position == character.Position {
+			return character, nil
+		}
+	}
+
+	return models.CharacterInfo{}, errors.New("no player found")
 }
 
 func getReverseMove(action models.Action) models.Action {
@@ -174,28 +200,28 @@ func shouldExplode(myCoordinate models.Coordinates, utility maputility.MapUtilit
 			case "OBSTACLE":
 				continue
 			case "POWERUP":
-				powerups += 1
+				powerups++
 			case "PLAYER":
 				// sure, explode and take him down!
 				return true
 			case "OPEN":
-				if getPlayerOnPosition(coordinate, utility) == utility.GetMyCharacterInfo().ID {
-					myTile += 1
-				} else if getPlayerOnPosition(coordinate, utility) == "" {
-					open += 1
+				if getPlayerColorIDOnPosition(coordinate, utility) == utility.GetMyCharacterInfo().ID {
+					myTile++
+				} else if getPlayerColorIDOnPosition(coordinate, utility) == "" {
+					open++
 				} else {
-					otherPlayers += 1
+					otherPlayers++
 				}
 			}
 
 		}
 	}
 
-	if percent.PercentOf(open+otherPlayers, noOfTiles-1) > 30 && powerups >= 2 {
+	if percent.PercentOf(open+otherPlayers, noOfTiles-1) > 30 && powerups >= 1 {
 		return true
 	}
 
-	if percent.PercentOf(otherPlayers, noOfTiles-1) > 25 {
+	if percent.PercentOf(otherPlayers, noOfTiles-1) > 45 {
 		return true
 	}
 
@@ -204,6 +230,16 @@ func shouldExplode(myCoordinate models.Coordinates, utility maputility.MapUtilit
 	}
 
 	return false
+}
+
+func shuffle(l []PossibleAction) []PossibleAction {
+	src := rand.NewSource(time.Now().UnixNano())
+	r := rand.New(src)
+	for i := range l {
+		n := r.Intn(len(l) - 1)
+		l[i], l[n] = l[n], l[i]
+	}
+	return l
 }
 
 func init() {
@@ -223,21 +259,21 @@ func init() {
 }
 
 // desired game settings can be changed to nil to get default settings
-var desiredGameSettings = &models.GameSettings{
-	MaxNOOFPlayers:                 5,
-	TimeInMSPerTick:                250,
-	ObstaclesEnabled:               true,
-	PowerUpsEnabled:                true,
-	AddPowerUpLikelihood:           38,
-	RemovePowerUpLikelihood:        5,
-	TrainingGame:                   true,
-	PointsPerTileOwned:             1,
-	PointsPerCausedStun:            5,
-	NOOFTicksInvulnerableAfterStun: 3,
-	NOOFTicksStunned:               10,
-	StartObstacles:                 40,
-	StartPowerUps:                  41,
-	GameDurationInSeconds:          15,
-	ExplosionRange:                 4,
-	PointsPerTick:                  false,
-}
+// var desiredGameSettings = &models.GameSettings{
+// 	MaxNOOFPlayers:                 8,
+// 	TimeInMSPerTick:                250,
+// 	ObstaclesEnabled:               true,
+// 	PowerUpsEnabled:                true,
+// 	AddPowerUpLikelihood:           10,
+// 	RemovePowerUpLikelihood:        5,
+// 	TrainingGame:                   true,
+// 	PointsPerTileOwned:             1,
+// 	PointsPerCausedStun:            5,
+// 	NOOFTicksInvulnerableAfterStun: 3,
+// 	NOOFTicksStunned:               10,
+// 	StartObstacles:                 50,
+// 	StartPowerUps:                  10,
+// 	GameDurationInSeconds:          15,
+// 	ExplosionRange:                 4,
+// 	PointsPerTick:                  false,
+// }

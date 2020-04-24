@@ -141,7 +141,6 @@ type GameEndedEvent struct {
 	PlayerWinnerName  string  `json:"playerWinnerName"`
 	GameID            string  `json:"gameId"`
 	GameTick          int     `json:"gameTick"`
-	Map               Map     `json:"map"`
 	ReceivingPlayerID *string `json:"receivingPlayerId"`
 	Timestamp         int     `json:"timestamp"`
 }
