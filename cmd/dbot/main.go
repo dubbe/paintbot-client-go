@@ -21,16 +21,12 @@ type PossibleAction struct {
 }
 
 func main() {
-	var desiredGameSettings *models.GameSettings = nil
-
-	basebot.Start("TestBot", models.Training, desiredGameSettings, calculateMove)
-
-	log.Info(desiredGameSettings)
+	basebot.Start("Thomat-Kickup", models.Tournament, desiredGameSettings, calculateMove)
 }
 
-//var moves = []models.Action{models.Left, models.Down, models.Right, models.Up} //, models.Stay}
 var lastDir = models.Stay
 var noOfRecursions = 7
+var explosionRange = 4
 
 // Implement your paintbot here
 func calculateMove(updateEvent models.MapUpdateEvent) models.Action {
@@ -43,7 +39,7 @@ func calculateMove(updateEvent models.MapUpdateEvent) models.Action {
 		return models.Stay
 	}
 
-	if me.CarryingPowerUp && shouldExplode(coordinates, utility, 4) {
+	if me.CarryingPowerUp && shouldExplode(coordinates, utility, explosionRange) {
 		return models.Explode
 	}
 
@@ -99,7 +95,7 @@ func calculateBestDirectionSync(action PossibleAction, coordinats models.Coordin
 		player, err := getPlayerOnPosition(coordinats, utility)
 		if err == nil {
 			if player.ID == utility.GetMyCharacterInfo().ID {
-				points += 0
+				points += -10
 			} else {
 				if player.CarryingPowerUp {
 					points += -100
@@ -259,21 +255,21 @@ func init() {
 }
 
 // desired game settings can be changed to nil to get default settings
-// var desiredGameSettings = &models.GameSettings{
-// 	MaxNOOFPlayers:                 8,
-// 	TimeInMSPerTick:                250,
-// 	ObstaclesEnabled:               true,
-// 	PowerUpsEnabled:                true,
-// 	AddPowerUpLikelihood:           10,
-// 	RemovePowerUpLikelihood:        5,
-// 	TrainingGame:                   true,
-// 	PointsPerTileOwned:             1,
-// 	PointsPerCausedStun:            5,
-// 	NOOFTicksInvulnerableAfterStun: 3,
-// 	NOOFTicksStunned:               10,
-// 	StartObstacles:                 50,
-// 	StartPowerUps:                  10,
-// 	GameDurationInSeconds:          15,
-// 	ExplosionRange:                 4,
-// 	PointsPerTick:                  false,
-// }
+var desiredGameSettings = &models.GameSettings{
+	MaxNOOFPlayers:                 3,
+	TimeInMSPerTick:                250,
+	ObstaclesEnabled:               true,
+	PowerUpsEnabled:                true,
+	AddPowerUpLikelihood:           15,
+	RemovePowerUpLikelihood:        5,
+	TrainingGame:                   true,
+	PointsPerTileOwned:             1,
+	PointsPerCausedStun:            5,
+	NOOFTicksInvulnerableAfterStun: 3,
+	NOOFTicksStunned:               10,
+	StartObstacles:                 50,
+	StartPowerUps:                  10,
+	GameDurationInSeconds:          15,
+	ExplosionRange:                 4,
+	PointsPerTick:                  false,
+}
